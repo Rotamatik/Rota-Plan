@@ -11,6 +11,7 @@
   <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
   <script src="https://unpkg.com/leaflet-simple-map-screenshoter"></script>
   <style>
+    /* (mevcut stil kodları aynen korunuyor) */
     body {
       display: flex;
       margin: 0;
@@ -207,7 +208,10 @@
     let currentStepIndex = 0;
     let isNavigating = false;
 
-    // Harita katmanları
+    // İşaretçileri tutacak dizi
+    let markers = [];
+
+    // Harita katmanları (aynı)
     const streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '© OpenStreetMap contributors'
@@ -238,7 +242,7 @@
       attribution: 'Tiles &copy; Esri'
     });
 
-    // Harita katmanı değiştirici
+    // Harita katmanı değiştirici (aynı)
     document.getElementById('map-layer').addEventListener('change', function() {
       const selectedLayer = this.value;
       map.eachLayer(function(layer) {
@@ -277,6 +281,13 @@
       }
     }
 
+    // Koordinat formatı kontrolü (enlem, boylam)
+    function isCoordinateFormat(text) {
+      const regex = /^\s*(-?\d+(\.\d+)?),\s*(-?\d+(\.\d+)?)\s*$/;
+      return regex.test(text);
+    }
+
+    // Durak ekleme fonksiyonu (aynı, ama adres inputuna koordinat girilirse otomatik doldurma eklendi)
     function addStop() {
       const stopDiv = document.createElement("div");
       stopDiv.className = "stop";
@@ -299,11 +310,62 @@
         <span class="remove-stop" onclick="removeStop(this)">✖</span>
       `;
       document.getElementById("stops").appendChild(stopDiv);
+
+      // Adres inputuna event listener ekle: Koordinat formatı girilirse cadde/sokak inputuna yaz ve city select'i gizle
+      const addressInput = stopDiv.querySelector('.address');
+      const coordInput = stopDiv.querySelector('.coordinates');
+      const citySelect = stopDiv.querySelector('.city');
+
+      addressInput.addEventListener('input', async () => {
+        const val = addressInput.value.trim();
+        if (isCoordinateFormat(val)) {
+          // Koordinat girilmiş, cadde/sokak inputuna koordinatı yaz
+          coordInput.value = val;
+          // Cadde/Sokak inputuna da koordinatı yaz (isteğinize göre)
+          addressInput.value = val;
+          // City seçimini boşaltabiliriz veya "Koordinat" olarak değiştirebiliriz
+          citySelect.style.display = 'none';
+        } else {
+          // Koordinat değilse city select tekrar göster
+          citySelect.style.display = '';
+          coordInput.value = ""; // Koordinat alanı temizlenebilir
+        }
+      });
     }
 
     function removeStop(element) {
       const stopDiv = element.parentElement;
       stopDiv.remove();
+      // Durak kaldırıldığında işaretçiyi de kaldır
+      updateMarkers();
+    }
+
+    // Haritadaki durak işaretçilerini güncelle
+    function updateMarkers() {
+      // Önce tüm işaretçileri kaldır
+      markers.forEach(marker => map.removeLayer(marker));
+      markers = [];
+
+      const coordinates = document.querySelectorAll(".coordinates");
+      for (let i = 0; i < coordinates.length; i++) {
+        const val = coordinates[i].value;
+        if (val) {
+          const parts = val.split(",").map(c => parseFloat(c.trim()));
+          if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+            const marker = L.marker([parts[0], parts[1]]).addTo(map);
+            // İsterseniz popup ekleyebilirsiniz:
+            const address = coordinates[i].parentElement.querySelector('.address').value;
+            marker.bindPopup(address);
+            markers.push(marker);
+          }
+        }
+      }
+
+      // İşaretçiler eklendikten sonra haritayı işaretçilere göre ayarla
+      if (markers.length > 0) {
+        const group = L.featureGroup(markers);
+        map.fitBounds(group.getBounds().pad(0.5));
+      }
     }
 
     async function getRoute() {
@@ -313,24 +375,22 @@
       const waypoints = [];
 
       for (let i = 0; i < addresses.length; i++) {
-        if (addresses[i].value) {
-          const coords = coordinates[i].value.split(",").map(coord => parseFloat(coord.trim()));
-          if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
-            waypoints.push(L.latLng(coords[0], coords[1]));
-          } else {
-            const location = await geocodeAddressWithCity(addresses[i].value, cities[i].value);
-            if (!location) {
-              alert("Bazı adresler bulunamadı.");
-              return;
-            }
-            waypoints.push(L.latLng(location.lat, location.lon));
-            coordinates[i].value = `${location.lat}, ${location.lon}`;
-          }
-        } else if (coordinates[i].value) {
+        // Eğer adres koordinat formatındaysa cadde/sokak kısmına zaten koordinat yazılmıştır.
+        // Burada öncelikle coordinates kontrol ediliyor.
+        if (coordinates[i].value) {
           const coords = coordinates[i].value.split(",").map(coord => parseFloat(coord.trim()));
           if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
             waypoints.push(L.latLng(coords[0], coords[1]));
           }
+        } else if (addresses[i].value) {
+          // Eğer koordinat yoksa adresi geocode et
+          const location = await geocodeAddressWithCity(addresses[i].value, cities[i].value);
+          if (!location) {
+            alert("Bazı adresler bulunamadı.");
+            return;
+          }
+          waypoints.push(L.latLng(location.lat, location.lon));
+          coordinates[i].value = `${location.lat}, ${location.lon}`;
         }
       }
 
@@ -361,6 +421,9 @@
         document.getElementById("route-distance").textContent = `Toplam Mesafe: ${km} km`;
         document.getElementById("start-navigation").style.display = "block";
       });
+
+      // İşaretçileri güncelle
+      updateMarkers();
     }
 
     function clearRoute() {
@@ -378,12 +441,18 @@
       document.getElementById("navigation-eta").style.display = "none";
       document.getElementById("navigation-arrow").style.display = "none";
       isNavigating = false;
-      
+
       if (currentLocationWatchId) {
         navigator.geolocation.clearWatch(currentLocationWatchId);
         currentLocationWatchId = null;
       }
+
+      // İşaretçileri temizle
+      markers.forEach(marker => map.removeLayer(marker));
+      markers = [];
     }
+
+    // (Diğer fonksiyonlar aynen korunuyor, değiştirilmedi)
 
     function startNavigation() {
       if (!currentRoute) {
@@ -395,10 +464,10 @@
       document.getElementById("navigation-panel").style.display = "block";
       document.getElementById("navigation-eta").style.display = "block";
       document.getElementById("navigation-arrow").style.display = "block";
-      
+
       // Navigasyon bilgilerini güncelle
       updateNavigationInfo(0);
-      
+
       // Kullanıcının konumunu takip et
       if (navigator.geolocation) {
         currentLocationWatchId = navigator.geolocation.watchPosition(
@@ -420,12 +489,12 @@
 
     function updateUserPosition(userLatLng) {
       if (!isNavigating || !currentRoute) return;
-      
+
       // Kullanıcının rotaya en yakın noktasını bul
       let closestPoint = null;
       let minDistance = Infinity;
       let closestIndex = 0;
-      
+
       currentRoute.coordinates.forEach((coord, index) => {
         const distance = userLatLng.distanceTo(coord);
         if (distance < minDistance) {
@@ -434,34 +503,34 @@
           closestIndex = index;
         }
       });
-      
+
       // Kullanıcının yönünü hesapla ve ok göster
       if (closestPoint && closestIndex < currentRoute.coordinates.length - 1) {
         const nextPoint = currentRoute.coordinates[closestIndex + 1];
         const angle = calculateBearing(userLatLng, nextPoint);
         document.getElementById("navigation-arrow").style.transform = `translate(-50%, -50%) rotate(${angle}deg)`;
       }
-      
+
       // Kullanıcının hangi adımda olduğunu bul
       let currentStep = null;
       let nextStep = null;
       let distanceToNextStep = Infinity;
-      
+
       for (let i = 0; i < currentRoute.instructions.length; i++) {
         const step = currentRoute.instructions[i];
         const stepDistance = userLatLng.distanceTo(step.intersection.coordinates);
-        
+
         if (stepDistance < distanceToNextStep) {
           distanceToNextStep = stepDistance;
           currentStep = step;
           nextStep = i < currentRoute.instructions.length - 1 ? currentRoute.instructions[i + 1] : null;
         }
       }
-      
+
       if (currentStep) {
         currentStepIndex = currentRoute.instructions.indexOf(currentStep);
         updateNavigationInfo(currentStepIndex);
-        
+
         // İlerleme çubuğunu güncelle
         const progress = (currentStepIndex / (currentRoute.instructions.length - 1)) * 100;
         document.getElementById("navigation-progress-bar").style.width = `${progress}%`;
@@ -473,9 +542,9 @@
       const fromLng = from.lng * Math.PI / 180;
       const toLat = to.lat * Math.PI / 180;
       const toLng = to.lng * Math.PI / 180;
-      
+
       const y = Math.sin(toLng - fromLng) * Math.cos(toLat);
-      const x = Math.cos(fromLat) * Math.sin(toLat) - 
+      const x = Math.cos(fromLat) * Math.sin(toLat) -
                 Math.sin(fromLat) * Math.cos(toLat) * Math.cos(toLng - fromLng);
       const bearing = Math.atan2(y, x) * 180 / Math.PI;
       return (bearing + 360) % 360;
@@ -483,36 +552,36 @@
 
     function updateNavigationInfo(stepIndex) {
       if (!currentRoute || stepIndex >= currentRoute.instructions.length) return;
-      
+
       const currentStep = currentRoute.instructions[stepIndex];
-      const nextStep = stepIndex < currentRoute.instructions.length - 1 ? 
+      const nextStep = stepIndex < currentRoute.instructions.length - 1 ?
                        currentRoute.instructions[stepIndex + 1] : null;
-      
+
       // Mevcut talimatı göster
       document.getElementById("navigation-instruction").textContent = currentStep.text;
-      
+
       // Mesafeyi göster
       if (currentStep.distance > 1000) {
-        document.getElementById("navigation-distance").textContent = 
+        document.getElementById("navigation-distance").textContent =
           `${(currentStep.distance / 1000).toFixed(1)} km sonra`;
       } else {
-        document.getElementById("navigation-distance").textContent = 
+        document.getElementById("navigation-distance").textContent =
           `${currentStep.distance} m sonra`;
       }
-      
+
       // Sonraki talimatı göster
       if (nextStep) {
-        document.getElementById("navigation-next-instruction").textContent = 
+        document.getElementById("navigation-next-instruction").textContent =
           `Sonra: ${nextStep.text}`;
       } else {
-        document.getElementById("navigation-next-instruction").textContent = 
+        document.getElementById("navigation-next-instruction").textContent =
           "Varış noktasına yaklaşıyorsunuz";
       }
-      
+
       // Tahmini varış süresini hesapla ve göster
       const remainingDistance = calculateRemainingDistance(stepIndex);
       const remainingTime = calculateRemainingTime(remainingDistance);
-      document.getElementById("navigation-eta").textContent = 
+      document.getElementById("navigation-eta").textContent =
         `Tahmini varış: ${formatTime(remainingTime)}`;
     }
 
@@ -571,6 +640,10 @@
             <span class="remove-stop" onclick="removeStop(this)">✖</span>
           `;
           document.getElementById("stops").insertBefore(stopDiv, document.getElementById("stops").firstChild);
+
+          // İşaretçileri güncelle
+          updateMarkers();
+
           document.getElementById("start-navigation").style.display = "block";
         });
       } else {
@@ -605,6 +678,9 @@
           <span class="remove-stop" onclick="removeStop(this)">✖</span>
         `;
         document.getElementById("stops").appendChild(stopDiv);
+
+        // İşaretçileri güncelle
+        updateMarkers();
       }
     });
 
@@ -617,7 +693,6 @@
       });
     });
 
-    // Yeni: Rotayı Paylaş butonu
     document.getElementById("share-route").addEventListener("click", () => {
       const stops = [];
       const addresses = document.querySelectorAll(".address");
@@ -639,16 +714,12 @@
         return;
       }
 
-      // JSON'u base64 encode et
       const stopsJson = JSON.stringify(stops);
       const encoded = btoa(encodeURIComponent(stopsJson));
-
-      // Yeni sayfada aç, URL parametresi olarak gönder
       const shareUrl = `${window.location.origin}${window.location.pathname}?route=${encoded}`;
       window.open(shareUrl, "_blank");
     });
 
-    // Sayfa yüklendiğinde URL parametresinden rota yükle
     async function loadRouteFromUrl() {
       const params = new URLSearchParams(window.location.search);
       if (params.has("route")) {
@@ -657,7 +728,6 @@
           const decodedJson = decodeURIComponent(atob(encoded));
           const stops = JSON.parse(decodedJson);
 
-          // Durakları temizle ve ekle
           document.getElementById("stops").innerHTML = "";
           stops.forEach(stop => {
             const stopDiv = document.createElement("div");
@@ -683,7 +753,9 @@
             document.getElementById("stops").appendChild(stopDiv);
           });
 
-          // Rota çiz
+          // İşaretçileri güncelle
+          updateMarkers();
+
           await getRoute();
         } catch (e) {
           console.error("URL'den rota yüklenirken hata:", e);
@@ -695,7 +767,6 @@
       loadRouteFromUrl();
     };
 
-    // Başlangıçta iki durak ekle
     if (!window.location.search.includes("route=")) {
       addStop(); addStop();
     }
