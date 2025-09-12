@@ -6,13 +6,16 @@
   <title>Rota Çizici</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-simple-map-screenshoter/dist/leaflet-simple-map-screenshoter.css" />
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
+  <script src="https://unpkg.com/leaflet-simple-map-screenshoter"></script>
   <style>
     body {
       display: flex;
       margin: 0;
       height: 100vh;
+      font-family: 'Roboto', Arial, sans-serif;
     }
     #map {
       flex: 1;
@@ -26,46 +29,242 @@
     }
     .stop {
       margin: 10px 0;
+      display: flex;
+      flex-direction: column;
     }
-    .stop input {
-      width: 250px;
+    .stop input, .stop select {
+      width: 100%;
+      margin-bottom: 5px;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    .remove-stop {
+      cursor: pointer;
+      color: red;
+      margin-top: 5px;
     }
     #route-distance {
       margin-top: 10px;
       font-weight: bold;
+      font-size: 14px;
     }
-    .leaflet-routing-container {
-      display: none !important;
+    button {
+      margin: 5px 0;
+      padding: 10px;
+      cursor: pointer;
+      background-color: #4285F4;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-weight: bold;
+      width: 100%;
+    }
+    button:hover {
+      background-color: #3367D6;
+    }
+    #navigation-panel {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      right: 20px;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+      padding: 15px;
+      z-index: 1000;
+      display: none;
+    }
+    #navigation-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    #navigation-instruction {
+      font-size: 18px;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+    #navigation-distance {
+      font-size: 14px;
+      color: #666;
+    }
+    #close-navigation {
+      cursor: pointer;
+      font-size: 20px;
+      color: #666;
+    }
+    #navigation-progress {
+      height: 4px;
+      background: #eee;
+      border-radius: 2px;
+      margin-top: 10px;
+    }
+    #navigation-progress-bar {
+      height: 100%;
+      background: #4285F4;
+      border-radius: 2px;
+      width: 0%;
+    }
+    #navigation-next {
+      margin-top: 15px;
+      display: flex;
+      align-items: center;
+      color: #666;
+      font-size: 14px;
+    }
+    #navigation-next-icon {
+      margin-right: 10px;
+      font-size: 20px;
+    }
+    #navigation-eta {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      padding: 5px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      z-index: 1000;
+      display: none;
+    }
+    #navigation-arrow {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 30px;
+      color: #4285F4;
+      z-index: 1000;
+      display: none;
     }
   </style>
 </head>
 <body>
   <div id="map"></div>
   <div id="sidebar">
-    <h1>Rota Çizici</h1>
+    <h1 style="color: #4285F4;">Rota Çizici</h1>
+    <div>
+      <label for="map-layer">Harita Katmanı:</label>
+      <select id="map-layer" class="form-control">
+        <option value="street">Sokak</option>
+        <option value="stadia">Stadia Maps</option>
+        <option value="topographic">Topoğrafik</option>
+        <option value="cartodb">CartoDB</option>
+        <option value="esriImagery">ESRI Dünya İmajı</option>
+        <option value="esriTopographic">ESRI Dünya Topografik</option>
+      </select>
+    </div>
+    <div>
+      <label for="use-free-roads">Ücretsiz Yolları Kullan:</label>
+      <select id="use-free-roads" class="form-control">
+        <option value="yes">Evet</option>
+        <option value="no">Hayır</option>
+      </select>
+    </div>
     <div id="stops"></div>
     <button id="add-stop">Durak Ekle</button>
     <button id="draw-route">Rotayı Çiz</button>
     <button id="clear-route">Rotayı Temizle</button>
-    <div id="share-link"></div>
+    <button id="save-route">Ekran Görüntüsü Al</button>
+    <button id="share-route">Rotayı Paylaş</button>
+    <button id="toggle-add-stop">Durak Ekleme Modu</button>
+    <button id="toggle-current-location">Anlık Konum Aç</button>
+    <button id="start-navigation" style="display:none; background-color: #34A853;">Navigasyonu Başlat</button>
     <div id="route-distance"></div>
   </div>
 
+  <!-- Navigasyon Paneli -->
+  <div id="navigation-panel">
+    <div id="navigation-header">
+      <div id="navigation-instruction"></div>
+      <div id="close-navigation">✖</div>
+    </div>
+    <div id="navigation-distance"></div>
+    <div id="navigation-progress">
+      <div id="navigation-progress-bar"></div>
+    </div>
+    <div id="navigation-next">
+      <div id="navigation-next-icon">→</div>
+      <div id="navigation-next-instruction"></div>
+    </div>
+  </div>
+
+  <div id="navigation-eta"></div>
+  <div id="navigation-arrow">↑</div>
+
   <script>
     const map = L.map('map').setView([39.0, 35.0], 6);
+    const screenshoter = L.simpleMapScreenshoter().addTo(map);
+    let routingControl = null;
+    let navigationControl = null;
+    let addingStop = false;
+    let currentLocationMarker = null;
+    let currentLocationWatchId = null;
+    let currentRoute = null;
+    let currentStepIndex = 0;
+    let isNavigating = false;
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    // Harita katmanları
+    const streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
-      attribution: '© OpenStreetMap',
-      crossOrigin: 'anonymous'
+      attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    let routingControl = null;
+    const stadiaLayer = L.tileLayer('https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}.png?api_key=b339735c-6c4f-4647-8319-988e9a64fa3a', {
+      maxZoom: 20,
+      attribution: '© Stadia Maps, OpenMapTiles, OpenStreetMap'
+    });
+
+    const topographicLayer = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+      maxZoom: 17,
+      attribution: '© OpenTopoMap contributors'
+    });
+
+    const cartoDBLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png', {
+      maxZoom: 20,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+    });
+
+    const esriImageryLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 18,
+      attribution: 'Tiles &copy; Esri'
+    });
+
+    const esriTopographicLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 18,
+      attribution: 'Tiles &copy; Esri'
+    });
+
+    // Harita katmanı değiştirici
+    document.getElementById('map-layer').addEventListener('change', function() {
+      const selectedLayer = this.value;
+      map.eachLayer(function(layer) {
+        if (layer instanceof L.TileLayer) {
+          map.removeLayer(layer);
+        }
+      });
+
+      if (selectedLayer === 'street') {
+        streetLayer.addTo(map);
+      } else if (selectedLayer === 'stadia') {
+        stadiaLayer.addTo(map);
+      } else if (selectedLayer === 'topographic') {
+        topographicLayer.addTo(map);
+      } else if (selectedLayer === 'cartodb') {
+        cartoDBLayer.addTo(map);
+      } else if (selectedLayer === 'esriImagery') {
+        esriImageryLayer.addTo(map);
+      } else if (selectedLayer === 'esriTopographic') {
+        esriTopographicLayer.addTo(map);
+      }
+    });
 
     async function geocodeAddressWithCity(address, city) {
       const fullAddress = `${address}, ${city}, Türkiye`;
       const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(fullAddress)}&limit=1`;
-
       try {
         const res = await fetch(url);
         const data = await res.json();
@@ -73,6 +272,7 @@
         return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
       } catch (err) {
         console.error("Geocode error:", err);
+        alert("Adres bulunamadı. Lütfen tekrar deneyin.");
         return null;
       }
     }
@@ -82,6 +282,7 @@
       stopDiv.className = "stop";
       stopDiv.innerHTML = `
         <input type="text" class="address" placeholder="Cadde/Sokak, Mahalle">
+        <input type="text" class="coordinates" placeholder="Koordinatlar" value="" readonly>
         <select class="city">
           ${[
             "Adana","Adıyaman","Afyonkarahisar","Ağrı","Aksaray","Amasya","Ankara","Antalya",
@@ -95,23 +296,50 @@
             "Şırnak","Tekirdağ","Tokat","Trabzon","Tunceli","Uşak","Van","Yalova","Yozgat","Zonguldak"
           ].map(city => `<option value="${city}">${city}</option>`).join('')}
         </select>
+        <span class="remove-stop" onclick="removeStop(this)">✖</span>
       `;
       document.getElementById("stops").appendChild(stopDiv);
     }
 
+    function removeStop(element) {
+      const stopDiv = element.parentElement;
+      stopDiv.remove();
+    }
+
     async function getRoute() {
       const addresses = document.querySelectorAll(".address");
+      const coordinates = document.querySelectorAll(".coordinates");
       const cities = document.querySelectorAll(".city");
       const waypoints = [];
 
       for (let i = 0; i < addresses.length; i++) {
-        const location = await geocodeAddressWithCity(addresses[i].value, cities[i].value);
-        if (!location) {
-          alert("Bazı adresler bulunamadı.");
-          return;
+        if (addresses[i].value) {
+          const coords = coordinates[i].value.split(",").map(coord => parseFloat(coord.trim()));
+          if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
+            waypoints.push(L.latLng(coords[0], coords[1]));
+          } else {
+            const location = await geocodeAddressWithCity(addresses[i].value, cities[i].value);
+            if (!location) {
+              alert("Bazı adresler bulunamadı.");
+              return;
+            }
+            waypoints.push(L.latLng(location.lat, location.lon));
+            coordinates[i].value = `${location.lat}, ${location.lon}`;
+          }
+        } else if (coordinates[i].value) {
+          const coords = coordinates[i].value.split(",").map(coord => parseFloat(coord.trim()));
+          if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
+            waypoints.push(L.latLng(coords[0], coords[1]));
+          }
         }
-        waypoints.push(L.latLng(location.lat, location.lon));
       }
+
+      if (waypoints.length === 0) {
+        alert("En az bir durak eklemelisiniz.");
+        return;
+      }
+
+      const useFreeRoads = document.getElementById('use-free-roads').value === 'yes';
 
       if (routingControl) {
         map.removeControl(routingControl);
@@ -121,21 +349,18 @@
         waypoints: waypoints,
         routeWhileDragging: true,
         createMarker: () => null,
+        styles: [{ color: useFreeRoads ? 'green' : 'red', opacity: 0.7, weight: 5 }],
+        router: L.Routing.osrmv1({
+          serviceUrl: 'https://router.project-osrm.org/route/v1'
+        })
       }).addTo(map);
 
       routingControl.on("routesfound", function(e) {
-        const route = e.routes[0];
-        const km = (route.summary.totalDistance / 1000).toFixed(2);
+        currentRoute = e.routes[0];
+        const km = (currentRoute.summary.totalDistance / 1000).toFixed(2);
         document.getElementById("route-distance").textContent = `Toplam Mesafe: ${km} km`;
+        document.getElementById("start-navigation").style.display = "block";
       });
-
-      const link = generateShareLink(waypoints);
-      document.getElementById("share-link").innerHTML = `<a href="${link}" target="_blank">Rota Linki: Paylaşmak için tıklayın</a>`;
-    }
-
-    function generateShareLink(waypoints) {
-      const coords = waypoints.map(wp => `${wp.lat},${wp.lng}`).join("&");
-      return `index.html?route=${coords}`;
     }
 
     function clearRoute() {
@@ -143,40 +368,337 @@
         map.removeControl(routingControl);
         routingControl = null;
       }
-      document.getElementById("share-link").textContent = "";
+      if (navigationControl) {
+        map.removeControl(navigationControl);
+        navigationControl = null;
+      }
       document.getElementById("route-distance").textContent = "";
+      document.getElementById("start-navigation").style.display = "none";
+      document.getElementById("navigation-panel").style.display = "none";
+      document.getElementById("navigation-eta").style.display = "none";
+      document.getElementById("navigation-arrow").style.display = "none";
+      isNavigating = false;
+      
+      if (currentLocationWatchId) {
+        navigator.geolocation.clearWatch(currentLocationWatchId);
+        currentLocationWatchId = null;
+      }
+    }
+
+    function startNavigation() {
+      if (!currentRoute) {
+        alert("Önce bir rota çizmelisiniz.");
+        return;
+      }
+
+      isNavigating = true;
+      document.getElementById("navigation-panel").style.display = "block";
+      document.getElementById("navigation-eta").style.display = "block";
+      document.getElementById("navigation-arrow").style.display = "block";
+      
+      // Navigasyon bilgilerini güncelle
+      updateNavigationInfo(0);
+      
+      // Kullanıcının konumunu takip et
+      if (navigator.geolocation) {
+        currentLocationWatchId = navigator.geolocation.watchPosition(
+          (position) => {
+            const userLatLng = L.latLng(position.coords.latitude, position.coords.longitude);
+            updateUserPosition(userLatLng);
+          },
+          (error) => {
+            console.error("Konum takip hatası:", error);
+          },
+          {
+            enableHighAccuracy: true,
+            maximumAge: 10000,
+            timeout: 5000
+          }
+        );
+      }
+    }
+
+    function updateUserPosition(userLatLng) {
+      if (!isNavigating || !currentRoute) return;
+      
+      // Kullanıcının rotaya en yakın noktasını bul
+      let closestPoint = null;
+      let minDistance = Infinity;
+      let closestIndex = 0;
+      
+      currentRoute.coordinates.forEach((coord, index) => {
+        const distance = userLatLng.distanceTo(coord);
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestPoint = coord;
+          closestIndex = index;
+        }
+      });
+      
+      // Kullanıcının yönünü hesapla ve ok göster
+      if (closestPoint && closestIndex < currentRoute.coordinates.length - 1) {
+        const nextPoint = currentRoute.coordinates[closestIndex + 1];
+        const angle = calculateBearing(userLatLng, nextPoint);
+        document.getElementById("navigation-arrow").style.transform = `translate(-50%, -50%) rotate(${angle}deg)`;
+      }
+      
+      // Kullanıcının hangi adımda olduğunu bul
+      let currentStep = null;
+      let nextStep = null;
+      let distanceToNextStep = Infinity;
+      
+      for (let i = 0; i < currentRoute.instructions.length; i++) {
+        const step = currentRoute.instructions[i];
+        const stepDistance = userLatLng.distanceTo(step.intersection.coordinates);
+        
+        if (stepDistance < distanceToNextStep) {
+          distanceToNextStep = stepDistance;
+          currentStep = step;
+          nextStep = i < currentRoute.instructions.length - 1 ? currentRoute.instructions[i + 1] : null;
+        }
+      }
+      
+      if (currentStep) {
+        currentStepIndex = currentRoute.instructions.indexOf(currentStep);
+        updateNavigationInfo(currentStepIndex);
+        
+        // İlerleme çubuğunu güncelle
+        const progress = (currentStepIndex / (currentRoute.instructions.length - 1)) * 100;
+        document.getElementById("navigation-progress-bar").style.width = `${progress}%`;
+      }
+    }
+
+    function calculateBearing(from, to) {
+      const fromLat = from.lat * Math.PI / 180;
+      const fromLng = from.lng * Math.PI / 180;
+      const toLat = to.lat * Math.PI / 180;
+      const toLng = to.lng * Math.PI / 180;
+      
+      const y = Math.sin(toLng - fromLng) * Math.cos(toLat);
+      const x = Math.cos(fromLat) * Math.sin(toLat) - 
+                Math.sin(fromLat) * Math.cos(toLat) * Math.cos(toLng - fromLng);
+      const bearing = Math.atan2(y, x) * 180 / Math.PI;
+      return (bearing + 360) % 360;
+    }
+
+    function updateNavigationInfo(stepIndex) {
+      if (!currentRoute || stepIndex >= currentRoute.instructions.length) return;
+      
+      const currentStep = currentRoute.instructions[stepIndex];
+      const nextStep = stepIndex < currentRoute.instructions.length - 1 ? 
+                       currentRoute.instructions[stepIndex + 1] : null;
+      
+      // Mevcut talimatı göster
+      document.getElementById("navigation-instruction").textContent = currentStep.text;
+      
+      // Mesafeyi göster
+      if (currentStep.distance > 1000) {
+        document.getElementById("navigation-distance").textContent = 
+          `${(currentStep.distance / 1000).toFixed(1)} km sonra`;
+      } else {
+        document.getElementById("navigation-distance").textContent = 
+          `${currentStep.distance} m sonra`;
+      }
+      
+      // Sonraki talimatı göster
+      if (nextStep) {
+        document.getElementById("navigation-next-instruction").textContent = 
+          `Sonra: ${nextStep.text}`;
+      } else {
+        document.getElementById("navigation-next-instruction").textContent = 
+          "Varış noktasına yaklaşıyorsunuz";
+      }
+      
+      // Tahmini varış süresini hesapla ve göster
+      const remainingDistance = calculateRemainingDistance(stepIndex);
+      const remainingTime = calculateRemainingTime(remainingDistance);
+      document.getElementById("navigation-eta").textContent = 
+        `Tahmini varış: ${formatTime(remainingTime)}`;
+    }
+
+    function calculateRemainingDistance(stepIndex) {
+      let distance = 0;
+      for (let i = stepIndex; i < currentRoute.instructions.length; i++) {
+        distance += currentRoute.instructions[i].distance;
+      }
+      return distance;
+    }
+
+    function calculateRemainingTime(distance) {
+      // Ortalama hız 50 km/sa varsayalım
+      const speed = 50; // km/sa
+      return (distance / 1000) / speed * 60; // dakika cinsinden
+    }
+
+    function formatTime(minutes) {
+      const now = new Date();
+      const arrival = new Date(now.getTime() + minutes * 60000);
+      return arrival.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
     }
 
     document.getElementById("add-stop").addEventListener("click", addStop);
     document.getElementById("draw-route").addEventListener("click", getRoute);
     document.getElementById("clear-route").addEventListener("click", clearRoute);
+    document.getElementById("start-navigation").addEventListener("click", startNavigation);
 
-    window.onload = () => {
-      const params = new URLSearchParams(window.location.search);
-      const routeParam = params.get("route");
-      if (routeParam) {
-        const waypoints = routeParam.split("&").map(coord => {
-          const [lat, lng] = coord.split(",");
-          return L.latLng(parseFloat(lat), parseFloat(lng));
+    document.getElementById("toggle-add-stop").addEventListener("click", function() {
+      addingStop = !addingStop;
+      this.style.backgroundColor = addingStop ? 'red' : '';
+      this.textContent = addingStop ? 'Durak Ekleme Modu Aktif' : 'Durak Ekleme Modu';
+    });
+
+    document.getElementById("toggle-current-location").addEventListener("click", function() {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(function(position) {
+          const lat = position.coords.latitude;
+          const lng = position.coords.longitude;
+
+          if (currentLocationMarker) {
+            map.removeLayer(currentLocationMarker);
+          }
+
+          currentLocationMarker = L.marker([lat, lng]).addTo(map).bindPopup("Anlık Konum").openPopup();
+          map.setView([lat, lng], 15);
+
+          const stopDiv = document.createElement("div");
+          stopDiv.className = "stop";
+          stopDiv.innerHTML = `
+            <input type="text" class="address" placeholder="Cadde/Sokak, Mahalle" value="Anlık Konum" readonly>
+            <input type="text" class="coordinates" placeholder="Koordinatlar" value="${lat}, ${lng}" readonly>
+            <select class="city" style="display:none;">
+              <option value="Ankara">Ankara</option>
+            </select>
+            <span class="remove-stop" onclick="removeStop(this)">✖</span>
+          `;
+          document.getElementById("stops").insertBefore(stopDiv, document.getElementById("stops").firstChild);
+          document.getElementById("start-navigation").style.display = "block";
         });
+      } else {
+        alert("Tarayıcınız konum hizmetlerini desteklemiyor.");
+      }
+    });
 
-        routingControl = L.Routing.control({
-          waypoints: waypoints,
-          createMarker: () => null,
-          routeWhileDragging: true,
-          fitSelectedRoutes: true,
-        }).addTo(map);
+    document.getElementById("close-navigation").addEventListener("click", function() {
+      clearRoute();
+    });
 
-        routingControl.on("routesfound", function(e) {
-          const route = e.routes[0];
-          const km = (route.summary.totalDistance / 1000).toFixed(2);
-          document.getElementById("route-distance").textContent = `Toplam Mesafe: ${km} km`;
-        });
+    map.on('click', function(e) {
+      if (addingStop) {
+        const stopDiv = document.createElement("div");
+        stopDiv.className = "stop";
+        stopDiv.innerHTML = `
+          <input type="text" class="address" placeholder="Cadde/Sokak, Mahalle">
+          <input type="text" class="coordinates" placeholder="Koordinatlar" value="${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}" readonly>
+          <select class="city">
+            ${[
+              "Adana","Adıyaman","Afyonkarahisar","Ağrı","Aksaray","Amasya","Ankara","Antalya",
+              "Ardahan","Artvin","Aydın","Balıkesir","Bartın","Batman","Bayburt","Bilecik",
+              "Bingöl","Bitlis","Bolu","Burdur","Bursa","Çanakkale","Çankırı","Çorum","Denizli",
+              "Diyarbakır","Düzce","Edirne","Elazığ","Erzincan","Erzurum","Eskişehir","Gaziantep",
+              "Giresun","Gümüşhane","Hakkari","Hatay","Iğdır","Isparta","İstanbul","İzmir","Kahramanmaraş",
+              "Karabük","Karaman","Kars","Kastamonu","Kayseri","Kırıkkale","Kırklareli","Kırşehir","Kilis",
+              "Kocaeli","Konya","Kütahya","Malatya","Manisa","Mardin","Mersin","Muğla","Muş","Nevşehir",
+              "Niğde","Ordu","Osmaniye","Rize","Sakarya","Samsun","Siirt","Sinop","Sivas","Şanlıurfa",
+              "Şırnak","Tekirdağ","Tokat","Trabzon","Tunceli","Uşak","Van","Yalova","Yozgat","Zonguldak"
+            ].map(city => `<option value="${city}">${city}</option>`).join('')}
+          </select>
+          <span class="remove-stop" onclick="removeStop(this)">✖</span>
+        `;
+        document.getElementById("stops").appendChild(stopDiv);
+      }
+    });
+
+    document.getElementById("save-route").addEventListener("click", () => {
+      screenshoter.takeScreen('blob').then(blob => {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "rota.png";
+        a.click();
+      });
+    });
+
+    // Yeni: Rotayı Paylaş butonu
+    document.getElementById("share-route").addEventListener("click", () => {
+      const stops = [];
+      const addresses = document.querySelectorAll(".address");
+      const coordinates = document.querySelectorAll(".coordinates");
+      const cities = document.querySelectorAll(".city");
+
+      for (let i = 0; i < addresses.length; i++) {
+        if (coordinates[i].value) {
+          stops.push({
+            address: addresses[i].value,
+            coords: coordinates[i].value,
+            city: cities[i].value
+          });
+        }
       }
 
-      addStop(); // varsayılan olarak 2 durak ekle
-      addStop();
+      if (stops.length === 0) {
+        alert("Paylaşmak için en az bir durak olmalı.");
+        return;
+      }
+
+      // JSON'u base64 encode et
+      const stopsJson = JSON.stringify(stops);
+      const encoded = btoa(encodeURIComponent(stopsJson));
+
+      // Yeni sayfada aç, URL parametresi olarak gönder
+      const shareUrl = `${window.location.origin}${window.location.pathname}?route=${encoded}`;
+      window.open(shareUrl, "_blank");
+    });
+
+    // Sayfa yüklendiğinde URL parametresinden rota yükle
+    async function loadRouteFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has("route")) {
+        try {
+          const encoded = params.get("route");
+          const decodedJson = decodeURIComponent(atob(encoded));
+          const stops = JSON.parse(decodedJson);
+
+          // Durakları temizle ve ekle
+          document.getElementById("stops").innerHTML = "";
+          stops.forEach(stop => {
+            const stopDiv = document.createElement("div");
+            stopDiv.className = "stop";
+            stopDiv.innerHTML = `
+              <input type="text" class="address" placeholder="Cadde/Sokak, Mahalle" value="${stop.address}">
+              <input type="text" class="coordinates" placeholder="Koordinatlar" value="${stop.coords}" readonly>
+              <select class="city">
+                ${[
+                  "Adana","Adıyaman","Afyonkarahisar","Ağrı","Aksaray","Amasya","Ankara","Antalya",
+                  "Ardahan","Artvin","Aydın","Balıkesir","Bartın","Batman","Bayburt","Bilecik",
+                  "Bingöl","Bitlis","Bolu","Burdur","Bursa","Çanakkale","Çankırı","Çorum","Denizli",
+                  "Diyarbakır","Düzce","Edirne","Elazığ","Erzincan","Erzurum","Eskişehir","Gaziantep",
+                  "Giresun","Gümüşhane","Hakkari","Hatay","Iğdır","Isparta","İstanbul","İzmir","Kahramanmaraş",
+                  "Karabük","Karaman","Kars","Kastamonu","Kayseri","Kırıkkale","Kırklareli","Kırşehir","Kilis",
+                  "Kocaeli","Konya","Kütahya","Malatya","Manisa","Mardin","Mersin","Muğla","Muş","Nevşehir",
+                  "Niğde","Ordu","Osmaniye","Rize","Sakarya","Samsun","Siirt","Sinop","Sivas","Şanlıurfa",
+                  "Şırnak","Tekirdağ","Tokat","Trabzon","Tunceli","Uşak","Van","Yalova","Yozgat","Zonguldak"
+                ].map(city => `<option value="${city}" ${city === stop.city ? "selected" : ""}>${city}</option>`).join('')}
+              </select>
+              <span class="remove-stop" onclick="removeStop(this)">✖</span>
+            `;
+            document.getElementById("stops").appendChild(stopDiv);
+          });
+
+          // Rota çiz
+          await getRoute();
+        } catch (e) {
+          console.error("URL'den rota yüklenirken hata:", e);
+        }
+      }
+    }
+
+    window.onload = () => {
+      loadRouteFromUrl();
     };
+
+    // Başlangıçta iki durak ekle
+    if (!window.location.search.includes("route=")) {
+      addStop(); addStop();
+    }
   </script>
 </body>
 </html>
