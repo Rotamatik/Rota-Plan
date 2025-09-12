@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Rota Çizici</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
+  <style>
+    body {
+      display: flex;
+      margin: 0;
+      height: 100vh;
+    }
+    #map {
+      flex: 1;
+      height: 100%;
+    }
+    #sidebar {
+      width: 300px;
+      background: #f0f0f0;
+      padding: 10px;
+      overflow-y: auto;
+    }
+    .stop {
+      margin: 10px 0;
+    }
+    .stop input {
+      width: 250px;
+    }
+    #route-distance {
+      margin-top: 10px;
+      font-weight: bold;
+    }
+    .leaflet-routing-container {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="sidebar">
+    <h1>Rota Çizici</h1>
+    <div id="stops"></div>
+    <button id="add-stop">Durak Ekle</button>
+    <button id="draw-route">Rotayı Çiz</button>
+    <button id="clear-route">Rotayı Temizle</button>
+    <div id="share-link"></div>
+    <div id="route-distance"></div>
+  </div>
+
+  <script>
+    const map = L.map('map').setView([39.0, 35.0], 6);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap',
+      crossOrigin: 'anonymous'
+    }).addTo(map);
+
+    let routingControl = null;
+
+    async function geocodeAddressWithCity(address, city) {
+      const fullAddress = `${address}, ${city}, Türkiye`;
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(fullAddress)}&limit=1`;
+
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.length === 0) return null;
+        return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+      } catch (err) {
+        console.error("Geocode error:", err);
+        return null;
+      }
+    }
+
+    function addStop() {
+      const stopDiv = document.createElement("div");
+      stopDiv.className = "stop";
+      stopDiv.innerHTML = `
+        <input type="text" class="address" placeholder="Cadde/Sokak, Mahalle">
+        <select class="city">
+          ${[
+            "Adana","Adıyaman","Afyonkarahisar","Ağrı","Aksaray","Amasya","Ankara","Antalya",
+            "Ardahan","Artvin","Aydın","Balıkesir","Bartın","Batman","Bayburt","Bilecik",
+            "Bingöl","Bitlis","Bolu","Burdur","Bursa","Çanakkale","Çankırı","Çorum","Denizli",
+            "Diyarbakır","Düzce","Edirne","Elazığ","Erzincan","Erzurum","Eskişehir","Gaziantep",
+            "Giresun","Gümüşhane","Hakkari","Hatay","Iğdır","Isparta","İstanbul","İzmir","Kahramanmaraş",
+            "Karabük","Karaman","Kars","Kastamonu","Kayseri","Kırıkkale","Kırklareli","Kırşehir","Kilis",
+            "Kocaeli","Konya","Kütahya","Malatya","Manisa","Mardin","Mersin","Muğla","Muş","Nevşehir",
+            "Niğde","Ordu","Osmaniye","Rize","Sakarya","Samsun","Siirt","Sinop","Sivas","Şanlıurfa",
+            "Şırnak","Tekirdağ","Tokat","Trabzon","Tunceli","Uşak","Van","Yalova","Yozgat","Zonguldak"
+          ].map(city => `<option value="${city}">${city}</option>`).join('')}
+        </select>
+      `;
+      document.getElementById("stops").appendChild(stopDiv);
+    }
+
+    async function getRoute() {
+      const addresses = document.querySelectorAll(".address");
+      const cities = document.querySelectorAll(".city");
+      const waypoints = [];
+
+      for (let i = 0; i < addresses.length; i++) {
+        const location = await geocodeAddressWithCity(addresses[i].value, cities[i].value);
+        if (!location) {
+          alert("Bazı adresler bulunamadı.");
+          return;
+        }
+        waypoints.push(L.latLng(location.lat, location.lon));
+      }
+
+      if (routingControl) {
+        map.removeControl(routingControl);
+      }
+
+      routingControl = L.Routing.control({
+        waypoints: waypoints,
+        routeWhileDragging: true,
+        createMarker: () => null,
+      }).addTo(map);
+
+      routingControl.on("routesfound", function(e) {
+        const route = e.routes[0];
+        const km = (route.summary.totalDistance / 1000).toFixed(2);
+        document.getElementById("route-distance").textContent = `Toplam Mesafe: ${km} km`;
+      });
+
+      const link = generateShareLink(waypoints);
+      document.getElementById("share-link").innerHTML = `<a href="${link}" target="_blank">Rota Linki: Paylaşmak için tıklayın</a>`;
+    }
+
+    function generateShareLink(waypoints) {
+      const coords = waypoints.map(wp => `${wp.lat},${wp.lng}`).join("&");
+      return `index.html?route=${coords}`;
+    }
+
+    function clearRoute() {
+      if (routingControl) {
+        map.removeControl(routingControl);
+        routingControl = null;
+      }
+      document.getElementById("share-link").textContent = "";
+      document.getElementById("route-distance").textContent = "";
+    }
+
+    document.getElementById("add-stop").addEventListener("click", addStop);
+    document.getElementById("draw-route").addEventListener("click", getRoute);
+    document.getElementById("clear-route").addEventListener("click", clearRoute);
+
+    window.onload = () => {
+      const params = new URLSearchParams(window.location.search);
+      const routeParam = params.get("route");
+      if (routeParam) {
+        const waypoints = routeParam.split("&").map(coord => {
+          const [lat, lng] = coord.split(",");
+          return L.latLng(parseFloat(lat), parseFloat(lng));
+        });
+
+        routingControl = L.Routing.control({
+          waypoints: waypoints,
+          createMarker: () => null,
+          routeWhileDragging: true,
+          fitSelectedRoutes: true,
+        }).addTo(map);
+
+        routingControl.on("routesfound", function(e) {
+          const route = e.routes[0];
+          const km = (route.summary.totalDistance / 1000).toFixed(2);
+          document.getElementById("route-distance").textContent = `Toplam Mesafe: ${km} km`;
+        });
+      }
+
+      addStop(); // varsayılan olarak 2 durak ekle
+      addStop();
+    };
+  </script>
+</body>
+</html>
